@@ -1,0 +1,141 @@
+#!/usr/bin/python
+'''
+This script is a nagios module and is intended for checking the number of items (mails) in mail queue directories.
+Based on the number of items above threshold, the status will be OK, WARNING, or CRITICAL
+
+Copyright 2019 Toni Feric
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+'''
+
+import argparse, os, sys
+
+
+# Define default values
+
+# Where is your totemomail installation root directory?
+dir_abs_root = '/opt/trustmail'
+
+# Don't modify (Relative path to mail queue directories)
+dir_rel_queues = '/mailer/apps/james/var/mail'
+
+# How old (minutes) should items be at minimum, until they can be considered for a warning alert?
+thresh_age_young = "5"
+
+# How old (minutes) should items be at minimum, until they can be considered for a critical alert?
+thresh_age_old = "30"
+
+# How many items at minimum should be in the queues, until a warning alert can be considered?
+thresh_items_young = 1
+
+# How many items at minimum should be in the queues, until a critical alert can be considered?
+thresh_items_old = 0
+
+
+# Define functions
+def args_parse():
+   '''
+      This function parses arguments passed to this script and returns them
+      Accessing global variables directly:
+         dir_abs_root
+         thresh_age_young
+         thresh_age_old
+         thresh_items_young
+         thresh_items_old
+   '''
+   # Define handling of possible arguments 
+   parser = argparse.ArgumentParser(description='Nagios plugin to alert on mail queue items of a totemomail server.')
+   parser.add_argument("--rootdir", required=False, type=str, default=dir_abs_root, help='Root directory of the totemomail installation (absolute path).')
+   parser.add_argument("--age_w", required=False, type=int, default=thresh_age_young, help='Messages older than this number of minutes will be used for warnings.')
+   parser.add_argument("--age_c", required=False, type=int, default=thresh_age_old, help='Messages older than this number of minutes will be used for critical alerts.')
+   parser.add_argument("--items_w", required=False, type=int, default=thresh_items_young, help='If there are more items than this number of messages (above warning age), trigger a warning alert.')
+   parser.add_argument("--items_c", required=False, type=int, default=thresh_items_old, help='If there are more items than this number of messages (above critical age), trigger a critical alert.')
+   parser.add_argument("--debug", required=False, action='store_true', help='Print additional debug messages (only makes sense when this script is ran by hand)')
+   
+   # Actually parse the arguments, passed to this script and return them
+   args = parser.parse_args()
+   return args
+
+
+def check_dirpath(d):
+   if not os.path.isdir(d):
+      print "UNKNOWN - ERROR: Path %s does not exist or is not a directory." % d
+      sys.exit(3)
+
+
+def exit_with_alertstate():
+   '''
+      This function generates the alert message and exits this script with the appropriate exit status and alert message
+      Accessing global variables directly:
+         thresh_age_young
+         thresh_age_old
+         thresh_items_young
+         thresh_items_old
+         items_young
+         items_old
+      Returning:
+         All arguments as Namespace object
+   '''
+
+   # Cases that determines the exit (alert) status. This script should be exiting here.
+   if items_young == 0 and items_old == 0:
+      print "OK - no items in mail queue"
+      sys.exit(0)
+   elif items_old > 0 and items_old >= thresh_items_old:
+      print "CRITICAL - %s items in mail queue (older than %s minutes)" % (items_old, thresh_age_old)
+      sys.exit(2)
+   elif items_young > 0 and items_young >= thresh_items_young:
+      print "WARNING - %s items in mail queue %s-%s minutes old)" % (items_young, thresh_age_young, thresh_age_old)
+      sys.exit(1)
+   elif items_young > 0 and items_young < thresh_items_young:
+      print "OK - %s items in mail queue (%s-%s minutes old. Number of items below threshold)" % (items_young, thresh_age_young, thresh_age_old)
+      sys.exit(0)
+   else:
+      print "UNKNOWN - Check failed for unknown reason."
+      sys.exit(3)
+
+
+def get_mailq_items():
+   '''
+      This function returns the number of items in a directory (incl. subdirs) if the items are older than a given age.
+      Accessing global variables directly:
+         dir_abs_queues
+         thresh_age_young
+         thresh_age_old
+      Returning:
+         list of numbers (young items and old items, under the directory d)
+   '''
+
+   check_dirpath(dir_abs_queues)
+
+   # Fetch the actual number of old items from the file system using the system command `find` and `wc -l`
+   items_young = os.popen("find " + dir_abs_queues + " -type f -mmin +" + str(thresh_age_young) + " | wc -l").readline().strip()
+   items_old = os.popen("find " + dir_abs_queues + " -type f -mmin +" + str(thresh_age_old) + " | wc -l").readline().strip()
+
+   # Every mail appears as two items (files) in a mail queue directory
+   items_young = (int(items_young) - int(items_old)) / 2
+   items_old = int(items_old) / 2
+   return (items_young, items_old)
+
+
+# Get arguments passed to this script, and copy them to global variables for convenience
+args = args_parse()
+dir_abs_queues = args.rootdir + dir_rel_queues
+thresh_age_young = args.age_w
+thresh_age_old = args.age_c
+thresh_items_young = args.items_w
+thresh_items_old = args.items_c
+
+if args.debug:
+   print "DEBUG: All arguments: " + str(args)
+
+# Get current items in mail queues
+(items_young, items_old) = get_mailq_items()
+if args.debug:
+   print "DEBUG: young items: %s ; old items: %s" % (items_young, items_old)
+
+exit_with_alertstate()
