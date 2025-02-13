@@ -20,7 +20,7 @@ import argparse, os, sys
 # Define default values
 
 # Where is your totemomail installation root directory?
-dir_abs_root = '/opt/trotemomail'
+dir_abs_root = '/opt/totemomail'
 
 # Don't modify (Relative path to mail queue directories)
 dir_rel_queues = '/mailer/apps/james/var/mail'
